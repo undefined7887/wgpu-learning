@@ -1,0 +1,12 @@
+[package]
+name = "rust-learning"
+version = "0.1.0"
+authors = ["Ярослав <undefined7887@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+winit = "0.22.2"
+wgpu = "0.5.2"
+futures = "0.3.5"
