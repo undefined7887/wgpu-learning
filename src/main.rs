@@ -86,6 +86,8 @@ struct State {
     swap_chain: wgpu::SwapChain,
     swap_chain_desc: wgpu::SwapChainDescriptor,
     size: winit::dpi::PhysicalSize<u32>,
+
+    render_pipeline: wgpu::RenderPipeline,
 }
 
 impl State {
@@ -123,6 +125,86 @@ impl State {
 
         let swap_chain = device.create_swap_chain(&surface, &swap_chain_desc);
 
+        let vertex_shader_src = include_str!("shader.vert");
+        let fragment_shader_src = include_str!("shader.frag");
+
+        let mut shader_compiler = shaderc::Compiler::new().unwrap();
+
+        let vertex_shader_spirv = shader_compiler
+            .compile_into_spirv(
+                vertex_shader_src,
+                shaderc::ShaderKind::Vertex,
+                "shader.vert",
+                "main",
+                None,
+            )
+            .unwrap();
+
+        let fragment_shader_spirv = shader_compiler
+            .compile_into_spirv(
+                fragment_shader_src,
+                shaderc::ShaderKind::Fragment,
+                "shader.frag",
+                "main",
+                None,
+            )
+            .unwrap();
+
+        let vertex_shader_data = wgpu::read_spirv(
+            std::io::Cursor::new(vertex_shader_spirv.as_binary_u8())
+        ).unwrap();
+
+        let fragment_shader_data = wgpu::read_spirv(
+            std::io::Cursor::new(fragment_shader_spirv.as_binary_u8())
+        ).unwrap();
+
+        let vertex_shader_module = device.create_shader_module(&vertex_shader_data);
+        let fragment_shader_module = device.create_shader_module(&fragment_shader_data);
+
+        let render_pipeline_layout = device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                bind_group_layouts: &[]
+            }
+        );
+
+        let render_pipeline = device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                layout: &render_pipeline_layout,
+                vertex_stage: wgpu::ProgrammableStageDescriptor {
+                    module: &vertex_shader_module,
+                    entry_point: "main",
+                },
+                fragment_stage: Some(wgpu::ProgrammableStageDescriptor {
+                    module: &fragment_shader_module,
+                    entry_point: "main",
+                }),
+                rasterization_state: Some(wgpu::RasterizationStateDescriptor {
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: wgpu::CullMode::Back,
+                    depth_bias: 0,
+                    depth_bias_clamp: 0.0,
+                    depth_bias_slope_scale: 0.0,
+                }),
+                color_states: &[
+                    wgpu::ColorStateDescriptor {
+                        format: swap_chain_desc.format,
+                        color_blend: wgpu::BlendDescriptor::REPLACE,
+                        alpha_blend: wgpu::BlendDescriptor::REPLACE,
+                        write_mask: wgpu::ColorWrite::ALL,
+                    }
+                ],
+                primitive_topology: wgpu::PrimitiveTopology::TriangleList,
+                depth_stencil_state: None,
+                vertex_state: wgpu::VertexStateDescriptor {
+                    index_format: wgpu::IndexFormat::Uint16,
+                    vertex_buffers: &[],
+                },
+                sample_count: 1,
+                sample_mask: !0,
+                alpha_to_coverage_enabled: false,
+            }
+        );
+
         State {
             surface,
             adapter,
@@ -131,6 +213,7 @@ impl State {
             swap_chain,
             swap_chain_desc,
             size,
+            render_pipeline,
         }
     }
 
@@ -150,9 +233,7 @@ impl State {
         false
     }
 
-    fn update(&mut self) {
-
-    }
+    fn update(&mut self) {}
 
     fn render(&mut self) {
         let frame = self.swap_chain
@@ -166,7 +247,7 @@ impl State {
                 }
             );
 
-        encoder.begin_render_pass(
+        let mut render_pass = encoder.begin_render_pass(
             &wgpu::RenderPassDescriptor {
                 color_attachments: &[
                     wgpu::RenderPassColorAttachmentDescriptor {
@@ -178,13 +259,17 @@ impl State {
                             r: 1f64,
                             g: 0.5f64,
                             b: 1f64,
-                            a: 1f64
-                        }
+                            a: 1f64,
+                        },
                     }
                 ],
-                depth_stencil_attachment: None
+                depth_stencil_attachment: None,
             }
         );
+
+        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.draw(0..3, 0..1);
+        drop(render_pass);
 
         self.queue.submit(
             &[
