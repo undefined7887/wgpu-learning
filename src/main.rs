@@ -3,27 +3,25 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
-use wgpu::Limits;
 use futures::executor::block_on;
+use std::mem;
 
 fn main() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
         .build(&event_loop)
-        .expect("Failed to build window");
+        .expect("Failed to build window 123");
 
     let mut state = block_on(State::new(&window));
 
     event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Wait;
+
         match event {
             Event::RedrawRequested(_) => {
                 println!("Redraw requested");
                 state.update();
                 state.render();
-            }
-
-            Event::MainEventsCleared => {
-                //window.request_redraw();
             }
 
             // Simple event for window
@@ -73,14 +71,45 @@ fn main() {
                     _ => {}
                 }
             }
-            _ => {}
+            _ => ()
         }
     })
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+struct Vertex {
+    pos: [f32; 3],
+    color: [f32; 3],
+}
+
+unsafe impl bytemuck::Pod for Vertex {}
+unsafe impl bytemuck::Zeroable for Vertex {}
+
+impl Vertex {
+    fn desc<'a>() -> wgpu::VertexBufferDescriptor<'a> {
+        wgpu::VertexBufferDescriptor {
+            stride: mem::size_of::<Vertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::InputStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttributeDescriptor {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float3,
+                },
+                wgpu::VertexAttributeDescriptor {
+                    offset: mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float3,
+                },
+            ]
+        }
+    }
+}
+
 struct State {
     surface: wgpu::Surface,
-    adapter: wgpu::Adapter,
+    _adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
     swap_chain: wgpu::SwapChain,
@@ -88,11 +117,15 @@ struct State {
     size: winit::dpi::PhysicalSize<u32>,
 
     render_pipeline: wgpu::RenderPipeline,
+
+    vertex_buffer: wgpu::Buffer,
+    num_vertices: u32
 }
 
 impl State {
     async fn new(window: &Window) -> Self {
         let size = window.inner_size();
+        println!("{} {}", size.width, size.height);
         let surface = wgpu::Surface::create(window);
 
         let adapter = wgpu::Adapter::request(
@@ -197,7 +230,9 @@ impl State {
                 depth_stencil_state: None,
                 vertex_state: wgpu::VertexStateDescriptor {
                     index_format: wgpu::IndexFormat::Uint16,
-                    vertex_buffers: &[],
+                    vertex_buffers: &[
+                        Vertex::desc(),
+                    ],
                 },
                 sample_count: 1,
                 sample_mask: !0,
@@ -205,15 +240,30 @@ impl State {
             }
         );
 
+        const VERTICES: &[Vertex] = &[
+            Vertex { pos: [0.0, 0.5, 0.0], color: [1.0, 0.0, 0.0] },
+            Vertex { pos: [-0.5, -0.5, 0.0], color: [0.0, 1.0, 0.0] },
+            Vertex { pos: [0.5, -0.5, 0.0], color: [0.0, 0.0, 1.0] },
+        ];
+
+        let vertex_buffer = device.create_buffer_with_data(
+            bytemuck::cast_slice(VERTICES),
+            wgpu::BufferUsage::VERTEX,
+        );
+
+        let num_vertices = VERTICES.len() as u32;
+
         State {
             surface,
-            adapter,
+            _adapter: adapter,
             device,
             queue,
             swap_chain,
             swap_chain_desc,
             size,
             render_pipeline,
+            vertex_buffer,
+            num_vertices
         }
     }
 
@@ -224,8 +274,8 @@ impl State {
         self.swap_chain = self.device.create_swap_chain(&self.surface, &self.swap_chain_desc);
 
         // Redrawing after resize
-        self.update();
-        self.render();
+        //self.update();
+        //self.render();
     }
 
     // input() won't deal with GPU code, so it can be synchronous
@@ -256,10 +306,10 @@ impl State {
                         load_op: wgpu::LoadOp::Clear,
                         store_op: wgpu::StoreOp::Store,
                         clear_color: wgpu::Color {
-                            r: 1f64,
-                            g: 0.5f64,
-                            b: 1f64,
-                            a: 1f64,
+                            r: 1.0,
+                            g: 1.0,
+                            b: 1.0,
+                            a: 1.0,
                         },
                     }
                 ],
@@ -267,8 +317,10 @@ impl State {
             }
         );
 
+        render_pass.set_vertex_buffer(0, &self.vertex_buffer, 0, 0);
         render_pass.set_pipeline(&self.render_pipeline);
-        render_pass.draw(0..3, 0..1);
+        render_pass.draw(0..self.num_vertices, 0..1);
+
         drop(render_pass);
 
         self.queue.submit(
