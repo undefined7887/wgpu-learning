@@ -1,0 +1,7 @@
+# OS & IDE
+.idea
+.vscode
+.DS_Store
+
+# Build & debug
+target
